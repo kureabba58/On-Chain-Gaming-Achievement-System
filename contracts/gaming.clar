@@ -173,3 +173,179 @@
         }
     )))
 )
+
+
+;; Badge mapping
+(define-map player-badges
+    { player: principal }
+    { current-badge: (string-ascii 50) }
+)
+
+;; Set badge based on points
+(define-public (update-player-badge (badge (string-ascii 50)))
+    (ok (map-set player-badges
+        { player: tx-sender }
+        { current-badge: badge }
+    ))
+)
+
+;; Get player badge
+(define-read-only (get-player-badge (player principal))
+    (map-get? player-badges { player: player })
+)
+
+
+;; Leaderboard map
+(define-map leaderboard-rankings
+    { rank: uint }
+    { player: principal, score: uint }
+)
+
+;; Update leaderboard
+(define-public (update-leaderboard (rank uint) (score uint))
+    (ok (map-set leaderboard-rankings
+        { rank: rank }
+        { player: tx-sender, score: score }
+    ))
+)
+
+;; Get rank
+(define-read-only (get-rank (rank-position uint))
+    (map-get? leaderboard-rankings { rank: rank-position })
+)
+
+
+;; Time-limited achievement map
+(define-map limited-time-achievements
+    { achievement-id: uint }
+    { 
+        start-height: uint,
+        end-height: uint,
+        bonus-points: uint
+    }
+)
+
+;; Create time-limited achievement
+(define-public (create-limited-achievement (achievement-id uint) (duration uint) (bonus uint))
+    (begin
+        (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+        (ok (map-set limited-time-achievements
+            { achievement-id: achievement-id }
+            { 
+                start-height: stacks-block-height,
+                end-height: (+ stacks-block-height duration),
+                bonus-points: bonus
+            }
+        ))
+    )
+)
+
+
+;; Combo tracking
+(define-map achievement-combos
+    { player: principal }
+    { 
+        combo-count: uint,
+        last-achievement-time: uint,
+        bonus-multiplier: uint
+    }
+)
+
+;; Update combo
+(define-public (update-combo)
+    (let (
+        (current-combo (default-to { combo-count: u0, last-achievement-time: u0, bonus-multiplier: u1 }
+            (map-get? achievement-combos { player: tx-sender })))
+    )
+    (ok (map-set achievement-combos
+        { player: tx-sender }
+        { 
+            combo-count: (+ (get combo-count current-combo) u1),
+            last-achievement-time: stacks-block-height,
+            bonus-multiplier: (+ (get bonus-multiplier current-combo) u1)
+        }
+    )))
+)
+
+
+;; Shared achievements
+(define-map shared-achievements
+    { share-id: uint }
+    { 
+        player: principal,
+        achievement-id: uint,
+        share-message: (string-ascii 100)
+    }
+)
+
+;; Share achievement
+(define-public (share-achievement (share-id uint) (achievement-id uint) (message (string-ascii 100)))
+    (ok (map-set shared-achievements
+        { share-id: share-id }
+        { 
+            player: tx-sender,
+            achievement-id: achievement-id,
+            share-message: message
+        }
+    ))
+)
+
+
+
+
+;; Daily challenges
+(define-map daily-challenges
+    { day-height: uint }
+    { 
+        challenge-id: uint,
+        points: uint,
+        completed-by: (list 100 principal)
+    }
+)
+
+;; Create daily challenge
+(define-public (set-daily-challenge (challenge-id uint) (points uint))
+    (begin
+        (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+        (ok (map-set daily-challenges
+            { day-height: stacks-block-height }
+            { 
+                challenge-id: challenge-id,
+                points: points,
+                completed-by: (list)
+            }
+        ))
+    )
+)
+
+
+;; Rarity levels
+(define-constant RARITY-COMMON u1)
+(define-constant RARITY-RARE u2)
+(define-constant RARITY-EPIC u3)
+(define-constant RARITY-LEGENDARY u4)
+
+;; Achievement rarity map
+(define-map achievement-rarity
+    { achievement-id: uint }
+    { 
+        rarity-level: uint,
+        total-claimed: uint,
+        max-claims: uint
+    }
+)
+
+;; Set achievement rarity
+(define-public (set-achievement-rarity (achievement-id uint) (rarity uint) (max-claims uint))
+    (begin
+        (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+        (ok (map-set achievement-rarity
+            { achievement-id: achievement-id }
+            { 
+                rarity-level: rarity,
+                total-claimed: u0,
+                max-claims: max-claims
+            }
+        ))
+    )
+)
