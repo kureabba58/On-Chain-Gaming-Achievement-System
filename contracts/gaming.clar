@@ -349,3 +349,395 @@
         ))
     )
 )
+
+
+
+(define-map achievement-tiers
+    { achievement-id: uint, tier: uint }
+    { 
+        tier-name: (string-ascii 20),
+        points-required: uint,
+        bonus-reward: uint
+    }
+)
+
+(define-map player-achievement-tiers
+    { player: principal, achievement-id: uint }
+    { current-tier: uint }
+)
+
+(define-public (add-achievement-tier (achievement-id uint) (tier uint) (tier-name (string-ascii 20)) (points-required uint) (bonus-reward uint))
+    (begin
+        (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+        (ok (map-set achievement-tiers
+            { achievement-id: achievement-id, tier: tier }
+            { 
+                tier-name: tier-name,
+                points-required: points-required,
+                bonus-reward: bonus-reward
+            }
+        ))
+    )
+)
+
+(define-public (upgrade-achievement-tier (achievement-id uint))
+    (let
+        (
+            (current-tier-data (default-to { current-tier: u0 } 
+                (map-get? player-achievement-tiers { player: tx-sender, achievement-id: achievement-id })))
+            (next-tier (+ (get current-tier current-tier-data) u1))
+            (next-tier-data (map-get? achievement-tiers { achievement-id: achievement-id, tier: next-tier }))
+        )
+        (asserts! (is-some next-tier-data) err-invalid-achievement)
+        (ok (map-set player-achievement-tiers
+            { player: tx-sender, achievement-id: achievement-id }
+            { current-tier: next-tier }
+        ))
+    )
+)
+
+(define-read-only (get-achievement-tier (achievement-id uint) (tier uint))
+    (map-get? achievement-tiers { achievement-id: achievement-id, tier: tier })
+)
+
+
+
+(define-constant err-invalid-quest (err u105))
+(define-constant err-quest-incomplete (err u106))
+
+(define-map quests
+    { quest-id: uint }
+    { 
+        name: (string-ascii 50),
+        description: (string-ascii 200),
+        required-achievements: (list 10 uint),
+        reward-points: uint,
+        active: bool
+    }
+)
+
+(define-map player-quests
+    { player: principal, quest-id: uint }
+    { completed: bool, completed-at: uint }
+)
+
+(define-public (add-quest (quest-id uint) (name (string-ascii 50)) (description (string-ascii 200)) (required-achievements (list 10 uint)) (reward-points uint))
+    (begin
+        (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+        (ok (map-set quests
+            { quest-id: quest-id }
+            { 
+                name: name,
+                description: description,
+                required-achievements: required-achievements,
+                reward-points: reward-points,
+                active: true
+            }
+        ))
+    )
+)
+
+(define-public (complete-quest (quest-id uint))
+    (let
+        (
+            (quest (unwrap! (map-get? quests { quest-id: quest-id }) err-invalid-quest))
+            (required-achievements (get required-achievements quest))
+            (reward-points (get reward-points quest))
+        )
+        (asserts! (get active quest) err-invalid-quest)
+        ;; (asserts! (check-achievements-completed tx-sender required-achievements) err-quest-incomplete)
+        (map-set player-quests
+            { player: tx-sender, quest-id: quest-id }
+            { completed: true, completed-at: stacks-block-height }
+        )
+        (update-player-points reward-points)
+    )
+)
+
+
+
+(define-read-only (check-achievement (result bool) (achievement-id uint))
+    (if result
+        (match (has-achievement tx-sender achievement-id)
+            claim (get claimed claim)
+            false
+        )
+        false
+    )
+)
+
+
+
+(define-constant err-already-referred (err u107))
+(define-constant REFERRAL-BONUS u50)
+
+(define-map referrals
+    { referred: principal }
+    { referrer: principal, processed: bool }
+)
+
+(define-map referral-counts
+    { referrer: principal }
+    { count: uint, total-bonus: uint }
+)
+
+(define-public (refer-player (referred principal))
+    (begin
+        (asserts! (not (is-eq tx-sender referred)) err-owner-only)
+        (asserts! (is-none (map-get? referrals { referred: referred })) err-already-referred)
+        (ok (map-set referrals
+            { referred: referred }
+            { referrer: tx-sender, processed: false }
+        ))
+    )
+)
+
+(define-public (claim-referral-bonus)
+    (let
+        (
+            (referral-data (unwrap! (map-get? referrals { referred: tx-sender }) err-not-claimed))
+            (referrer (get referrer referral-data))
+            (processed (get processed referral-data))
+            (current-count (default-to { count: u0, total-bonus: u0 } 
+                (map-get? referral-counts { referrer: referrer })))
+        )
+        (asserts! (not processed) err-already-claimed)
+        (map-set referrals
+            { referred: tx-sender }
+            { referrer: referrer, processed: true }
+        )
+        (map-set referral-counts
+            { referrer: referrer }
+            { 
+                count: (+ (get count current-count) u1),
+                total-bonus: (+ (get total-bonus current-count) REFERRAL-BONUS)
+            }
+        )
+        (update-player-points REFERRAL-BONUS)
+    )
+)
+
+(define-read-only (get-referral-count (player principal))
+    (map-get? referral-counts { referrer: player })
+)
+
+
+
+(define-constant err-season-inactive (err u108))
+
+(define-map seasons
+    { season-id: uint }
+    { 
+        name: (string-ascii 50),
+        start-height: uint,
+        end-height: uint,
+        active: bool,
+        bonus-multiplier: uint
+    }
+)
+
+(define-map season-achievements
+    { season-id: uint, achievement-id: uint }
+    { active: bool, bonus-points: uint }
+)
+
+(define-map player-season-stats
+    { player: principal, season-id: uint }
+    { 
+        points-earned: uint,
+        achievements-completed: uint,
+        rank: uint
+    }
+)
+
+(define-public (create-season (season-id uint) (name (string-ascii 50)) (duration uint) (bonus-multiplier uint))
+    (begin
+        (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+        (ok (map-set seasons
+            { season-id: season-id }
+            { 
+                name: name,
+                start-height: stacks-block-height,
+                end-height: (+ stacks-block-height duration),
+                active: true,
+                bonus-multiplier: bonus-multiplier
+            }
+        ))
+    )
+)
+
+(define-public (add-season-achievement (season-id uint) (achievement-id uint) (bonus-points uint))
+    (begin
+        (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+        (ok (map-set season-achievements
+            { season-id: season-id, achievement-id: achievement-id }
+            { active: true, bonus-points: bonus-points }
+        ))
+    )
+)
+
+(define-public (claim-season-achievement (season-id uint) (achievement-id uint))
+    (let
+        (
+            (season (unwrap! (map-get? seasons { season-id: season-id }) err-invalid-achievement))
+            (season-achievement (unwrap! (map-get? season-achievements 
+                { season-id: season-id, achievement-id: achievement-id }) err-invalid-achievement))
+            (achievement-claim (claim-achievement achievement-id))
+            (current-stats (default-to { points-earned: u0, achievements-completed: u0, rank: u0 } 
+                (map-get? player-season-stats { player: tx-sender, season-id: season-id })))
+            (bonus-points (get bonus-points season-achievement))
+        )
+        (asserts! (get active season) err-season-inactive)
+        (asserts! (get active season-achievement) err-invalid-achievement)
+        ;; (asserts! (is-ok achievement-claim) (unwrap-err! achievement-claim err-already-claimed))
+        (map-set player-season-stats
+            { player: tx-sender, season-id: season-id }
+            { 
+                points-earned: (+ (get points-earned current-stats) bonus-points),
+                achievements-completed: (+ (get achievements-completed current-stats) u1),
+                rank: (get rank current-stats)
+            }
+        )
+        (update-player-points bonus-points)
+    )
+)
+
+
+(define-constant err-insufficient-funds (err u109))
+(define-constant err-not-for-sale (err u110))
+
+(define-map marketplace-items
+    { item-id: uint }
+    { 
+        name: (string-ascii 50),
+        description: (string-ascii 200),
+        price: uint,
+        required-points: uint,
+        available: bool,
+        total-supply: uint,
+        sold: uint
+    }
+)
+
+(define-map player-items
+    { player: principal, item-id: uint }
+    { quantity: uint, purchased-at: uint }
+)
+
+(define-public (add-marketplace-item (item-id uint) (name (string-ascii 50)) (description (string-ascii 200)) (price uint) (required-points uint) (total-supply uint))
+    (begin
+        (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+        (ok (map-set marketplace-items
+            { item-id: item-id }
+            { 
+                name: name,
+                description: description,
+                price: price,
+                required-points: required-points,
+                available: true,
+                total-supply: total-supply,
+                sold: u0
+            }
+        ))
+    )
+)
+
+(define-public (purchase-item (item-id uint))
+    (let
+        (
+            (item (unwrap! (map-get? marketplace-items { item-id: item-id }) err-invalid-achievement))
+            (player-points (unwrap! (get-player-points tx-sender) err-insufficient-funds))
+            (current-items (default-to { quantity: u0, purchased-at: u0 } 
+                (map-get? player-items { player: tx-sender, item-id: item-id })))
+            (price (get price item))
+            (required-points (get required-points item))
+            (available (get available item))
+            (total-supply (get total-supply item))
+            (sold (get sold item))
+        )
+        (asserts! available err-not-for-sale)
+        (asserts! (< sold total-supply) err-not-for-sale)
+        (asserts! (>= (get total-points player-points) required-points) err-insufficient-funds)
+        
+        (map-set player-items
+            { player: tx-sender, item-id: item-id }
+            { quantity: (+ (get quantity current-items) u1), purchased-at: stacks-block-height }
+        )
+        
+        (map-set marketplace-items
+            { item-id: item-id }
+            (merge item { sold: (+ sold u1) })
+        )
+        
+        (ok true)
+    )
+)
+
+(define-read-only (get-player-items (player principal) (item-id uint))
+    (map-get? player-items { player: player, item-id: item-id })
+)
+
+
+(define-constant err-team-full (err u111))
+(define-constant err-not-team-member (err u112))
+(define-constant MAX-TEAM-SIZE u5)
+
+(define-map teams
+    { team-id: uint }
+    { 
+        name: (string-ascii 50),
+        leader: principal,
+        members: (list 5 principal),
+        total-points: uint,
+        created-at: uint
+    }
+)
+
+(define-map player-teams
+    { player: principal }
+    { team-id: uint }
+)
+
+(define-map team-achievements
+    { team-id: uint, achievement-id: uint }
+    { completed: bool, completed-at: uint }
+)
+
+(define-public (create-team (team-id uint) (name (string-ascii 50)))
+    (begin
+        (ok (map-set teams
+            { team-id: team-id }
+            { 
+                name: name,
+                leader: tx-sender,
+                members: (list tx-sender),
+                total-points: u0,
+                created-at: stacks-block-height
+            }
+        ))
+    )
+)
+
+
+
+(define-public (complete-team-achievement (team-id uint) (achievement-id uint))
+    (let
+        (
+            (team (unwrap! (map-get? teams { team-id: team-id }) err-invalid-achievement))
+            (members (get members team))
+            (player-team (unwrap! (map-get? player-teams { player: tx-sender }) err-not-team-member))
+            (achievement (unwrap! (map-get? achievements { achievement-id: achievement-id }) err-invalid-achievement))
+            (points (get points achievement))
+        )
+        (asserts! (is-eq (get team-id player-team) team-id) err-not-team-member)
+        (map-set team-achievements
+            { team-id: team-id, achievement-id: achievement-id }
+            { completed: true, completed-at: stacks-block-height }
+        )
+        (map-set teams
+            { team-id: team-id }
+            (merge team { total-points: (+ (get total-points team) points) })
+        )
+        (ok true)
+    )
+)
