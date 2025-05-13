@@ -793,3 +793,56 @@
 )
 
 
+(define-constant err-not-staked (err u300))
+(define-constant err-already-staked (err u301))
+(define-constant BLOCKS_PER_REWARD u144)
+(define-constant BASE_REWARD_RATE u10)
+
+(define-map staked-achievements
+    { player: principal, achievement-id: uint }
+    {
+        staked-at: uint,
+        last-claim: uint,
+        multiplier: uint
+    }
+)
+
+(define-map staking-rewards
+    { player: principal }
+    { pending-rewards: uint }
+)
+
+(define-public (stake-achievement (achievement-id uint))
+    (let
+        (
+            (achievement-claim (unwrap! (has-achievement tx-sender achievement-id) err-not-achievement-owner))
+            (existing-stake (map-get? staked-achievements { player: tx-sender, achievement-id: achievement-id }))
+        )
+        (asserts! (is-none existing-stake) err-already-staked)
+        (ok (map-set staked-achievements
+            { player: tx-sender, achievement-id: achievement-id }
+            {
+                staked-at: stacks-block-height,
+                last-claim: stacks-block-height,
+                multiplier: u1
+            }
+        ))
+    )
+)
+
+(define-public (claim-staking-rewards (achievement-id uint))
+    (let
+        (
+            (stake-data (unwrap! (map-get? staked-achievements 
+                { player: tx-sender, achievement-id: achievement-id }) err-not-staked))
+            (blocks-staked (- stacks-block-height (get last-claim stake-data)))
+            (reward-amount (* (/ blocks-staked BLOCKS_PER_REWARD) 
+                            (* BASE_REWARD_RATE (get multiplier stake-data))))
+        )
+        (map-set staked-achievements
+            { player: tx-sender, achievement-id: achievement-id }
+            (merge stake-data { last-claim: stacks-block-height })
+        )
+        (update-player-points reward-amount)
+    )
+)
