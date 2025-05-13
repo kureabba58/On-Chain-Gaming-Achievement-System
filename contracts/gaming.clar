@@ -741,3 +741,55 @@
         (ok true)
     )
 )
+
+
+(define-non-fungible-token achievement-nft uint)
+
+(define-constant err-not-achievement-owner (err u200))
+(define-constant err-nft-exists (err u201))
+
+(define-map nft-metadata
+    { token-id: uint }
+    {
+        achievement-id: uint,
+        player: principal,
+        earned-at: uint,
+        rarity: uint
+    }
+)
+
+(define-map player-nft-count
+    { player: principal }
+    { count: uint }
+)
+
+(define-public (mint-achievement-nft (achievement-id uint))
+    (let
+        (
+            (achievement-claim (unwrap! (has-achievement tx-sender achievement-id) err-not-achievement-owner))
+            (player-count (default-to { count: u0 } (map-get? player-nft-count { player: tx-sender })))
+            (new-token-id (+ (* u1000000 achievement-id) (get count player-count)))
+        )
+        (asserts! (get claimed achievement-claim) err-not-achievement-owner)
+        (try! (nft-mint? achievement-nft new-token-id tx-sender))
+        (map-set nft-metadata
+            { token-id: new-token-id }
+            {
+                achievement-id: achievement-id,
+                player: tx-sender,
+                earned-at: (get claimed-at achievement-claim),
+                rarity: u1
+            }
+        )
+        (ok (map-set player-nft-count
+            { player: tx-sender }
+            { count: (+ (get count player-count) u1) }
+        ))
+    )
+)
+
+(define-read-only (get-nft-metadata (token-id uint))
+    (map-get? nft-metadata { token-id: token-id })
+)
+
+
