@@ -50,8 +50,18 @@ plan:
     - id: 0
       transactions:
         - emulated-contract-publish:
+            contract-name: cross-game-bridge
+            emulated-sender: ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM
+            path: "contracts\\cross-game-bridge.clar"
+            clarity-version: 3
+        - emulated-contract-publish:
+            contract-name: dynamic-difficulty
+            emulated-sender: ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM
+            path: "contracts\\dynamic-difficulty.clar"
+            clarity-version: 3
+        - emulated-contract-publish:
             contract-name: gaming
             emulated-sender: ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM
-            path: contracts/gaming.clar
+            path: "contracts\\gaming.clar"
             clarity-version: 3
       epoch: "3.1"
