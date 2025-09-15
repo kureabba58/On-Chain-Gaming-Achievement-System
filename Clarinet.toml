@@ -5,8 +5,23 @@ authors = []
 telemetry = true
 cache_dir = '.\.cache'
 requirements = []
+[contracts.cross-game-bridge]
+path = 'contracts/cross-game-bridge.clar'
+clarity_version = 3
+epoch = 3.1
+
+[contracts.dynamic-difficulty]
+path = 'contracts/dynamic-difficulty.clar'
+clarity_version = 3
+epoch = 3.1
+
 [contracts.gaming]
 path = 'contracts/gaming.clar'
+clarity_version = 3
+epoch = 3.1
+
+[contracts.player-reputation]
+path = 'contracts/player-reputation.clar'
 clarity_version = 3
 epoch = 3.1
 [repl.analysis]
